@@ -1,12 +1,55 @@
 {
   "name": "second-brain",
+  "version": "1.0.0",
   "private": true,
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "<REPLACE_WITH_GITHUB_REPOSITORY>"
+  },
+  "license": "MIT",
+  "keywords": [
+    "second-brain",
+    "knowledge-management",
+    "mern",
+    "ai",
+    "semantic-search",
+    "knowledge-graph"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
   "scripts": {
-    "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint"
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint -- --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "turbo run check",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rimraf node_modules",
+    "prepare": "husky install"
   },
   "devDependencies": {
-    "turbo": "latest"
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "eslint": "^8.57.0",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.2",
+    "prettier": "^3.2.5",
+    "rimraf": "^5.0.5",
+    "turbo": "^1.13.0"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{md,json,yaml,yml}": [
+      "prettier --write"
+    ]
   }
 }

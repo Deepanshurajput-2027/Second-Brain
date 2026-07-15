@@ -1,0 +1,13 @@
+{
+  "name": "@second-brain/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{js,ts}\""
+  },
+  "dependencies": {
+    "zod": "^3.22.4"
+  }
+}
