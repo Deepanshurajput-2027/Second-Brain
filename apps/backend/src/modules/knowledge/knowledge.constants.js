@@ -1,0 +1,15 @@
+export const SOURCE_TYPES = {
+  URL: 'URL',
+  YOUTUBE: 'YOUTUBE',
+  PDF: 'PDF',
+  IMAGE: 'IMAGE',
+  TEXT: 'TEXT',
+  MARKDOWN: 'MARKDOWN',
+};
+
+export const AI_STATUS = {
+  PENDING: 'PENDING',
+  PROCESSING: 'PROCESSING',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+};

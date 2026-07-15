@@ -1,5 +1,3 @@
 packages:
-  - "frontend"
-  - "backend"
-  - "ai-service"
-  - "shared"
+  - "apps/*"
+  - "packages/*"

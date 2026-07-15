@@ -1,5 +1,38 @@
-node_modules
-.turbo
-dist
+# Node
+node_modules/
+dist/
+build/
+.next/
+
+# Vite
+frontend/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env/
+.venv/
+
+# Environment Variables
 .env
-.next
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Coverage
+coverage/
+
+# Misc
+.turbo/
+.DS_Store
