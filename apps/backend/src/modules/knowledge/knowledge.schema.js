@@ -40,8 +40,10 @@ const knowledgeSchema = new Schema(
       default: AI_STATUS.PENDING,
     },
     metadata: {
-      type: Schema.Types.Mixed,
-      default: {},
+      embedding: {
+        type: [Number],
+        default: null,
+      },
     },
   },
   {
