@@ -1,5 +1,6 @@
 import { KnowledgeRepository } from './knowledge.repository.js';
 import { ApiError } from '../../shared/errors/ApiError.js';
+import { queueService } from '../../queues/index.js';
 
 /**
  * Service orchestrating knowledge business logic and authorizations
@@ -17,9 +18,11 @@ export class KnowledgeService {
       userId,
     };
 
-    const createdItem = await KnowledgeRepository.createKnowledge(itemData);
+    
 
-    // TODO: Dispatch job to BullMQ AI Queue
+    const createdItem = await KnowledgeRepository.createKnowledge({ ...payload, userId });
+
+    await queueService.dispatchAiProcessing(createdItem._id, userId);
 
     return createdItem;
   }
