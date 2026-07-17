@@ -57,4 +57,13 @@ export class KnowledgeRepository {
     // Assuming softDeletePlugin exposes a `softDelete` method
     return Knowledge.softDelete({ _id: id });
   }
+
+  /**
+   * Find knowledge items based on a query
+   * @param {Object} query - The query object
+   * @returns {Promise<Array<import('./knowledge.types.js').KnowledgeDocument>>}
+   */
+  static async find(query) {
+    return Knowledge.find(query).exec();
+  }
 }

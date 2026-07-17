@@ -1,6 +1,9 @@
 import { KnowledgeService } from './knowledge.service.js';
+import { KnowledgeRepository } from './knowledge.repository.js';
 import { asyncHandler } from '../../utils/helpers/asyncHandler.js';
 import { successResponse } from '../../shared/responses/apiResponse.js';
+import axios from 'axios';
+import { qdrantClient } from '../../database/qdrant.config.js';
 
 /**
  * Create a new knowledge item
@@ -41,4 +44,64 @@ export const updateKnowledgeHandler = asyncHandler(async (req, res) => {
 export const deleteKnowledgeHandler = asyncHandler(async (req, res) => {
   await KnowledgeService.deleteItem(req.user.id, req.params.id);
   return successResponse(res, 200, 'Knowledge item deleted successfully');
+});
+
+/**
+ * Perform a semantic search on the user's knowledge base
+ */
+export const searchKnowledgeHandler = asyncHandler(async (req, res) => {
+  const { q } = req.query;
+  // Fallback to _id just in case your auth middleware binds it differently
+  const userId = req.user.id || req.user._id;
+
+  if (!q) {
+    return res.status(400).json({ success: false, message: 'Search query "q" is required' });
+  }
+
+  const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5000';
+
+  // 1. Vectorize the Search Query
+  const aiResponse = await axios.post(`${AI_SERVICE_URL}/api/v1/process`, { text: q }, { timeout: 10000 });
+  let { embedding } = aiResponse.data;
+
+  // 🛡️ FIX: Flatten the embedding if Python returned a 2D array (e.g., [[0.1, 0.2]])
+  if (Array.isArray(embedding) && Array.isArray(embedding[0])) {
+    embedding = embedding[0];
+  }
+
+  // 2. Query Qdrant for Nearest Neighbors
+  let qdrantResults;
+  try {
+    qdrantResults = await qdrantClient.search('knowledge_vectors', {
+      vector: embedding,
+      limit: 5,
+      filter: {
+        must: [
+          { key: 'userId', match: { value: String(userId) } }
+        ]
+      }
+    });
+  } catch (error) {
+    console.error("--- QDRANT REJECTED SEARCH ---", error);
+    return res.status(500).json({
+      success: false,
+      message: 'Vector database rejected the search query.',
+      details: error.message
+    });
+  }
+
+  // Extract the original MongoDB ObjectIDs from the Qdrant payload
+  const knowledgeIds = qdrantResults.map(item => item.payload.knowledgeId);
+
+  // 3. Hydrate from MongoDB
+  let populatedDocs = [];
+  if (knowledgeIds.length > 0) {
+    populatedDocs = await KnowledgeRepository.find({ _id: { $in: knowledgeIds } });
+
+    // Sort populated docs based on Qdrant result score/order
+    const orderMap = new Map(knowledgeIds.map((id, index) => [String(id), index]));
+    populatedDocs.sort((a, b) => orderMap.get(String(a._id)) - orderMap.get(String(b._id)));
+  }
+
+  return successResponse(res, 200, 'Semantic search completed successfully', { items: populatedDocs });
 });
