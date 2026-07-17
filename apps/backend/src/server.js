@@ -4,6 +4,7 @@ import connectDatabase from './config/database.config.js';
 import { validateEnv } from './shared/validators/envValidator.js';
 import logger from './utils/logger/logger.js';
 import { startWorkers } from './queues/index.js'; 
+import { initQdrantCollections } from './database/qdrant.init.js';
 
 const PORT = process.env.PORT || 3000;
 
@@ -12,6 +13,7 @@ const startServer = async () => {
     validateEnv();
     
     await connectDatabase();
+    await initQdrantCollections();
     
     //Start the BullMQ background workers
     startWorkers(); 

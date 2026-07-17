@@ -10,6 +10,7 @@
     "lint": "eslint src --ext .js"
   },
   "dependencies": {
+    "@qdrant/js-client-rest": "^1.18.0",
     "axios": "^1.18.1",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.80.5",
