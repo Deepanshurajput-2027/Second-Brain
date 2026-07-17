@@ -9,6 +9,7 @@ import {
   updateKnowledgeHandler,
   deleteKnowledgeHandler,
   searchKnowledgeHandler,
+  getRelatedKnowledgeHandler,
 } from './knowledge.controller.js';
 
 const router = Router();
@@ -19,6 +20,7 @@ router.use(requireAuth);
 router.post('/', validate(createKnowledgeSchema), createKnowledgeHandler);
 router.get('/', getKnowledgeHandler);
 router.get('/search', searchKnowledgeHandler);
+router.get('/:id/related', getRelatedKnowledgeHandler);
 router.get('/:id', getKnowledgeByIdHandler);
 router.patch('/:id', validate(updateKnowledgeSchema), updateKnowledgeHandler);
 router.delete('/:id', deleteKnowledgeHandler);

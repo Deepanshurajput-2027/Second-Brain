@@ -21,14 +21,21 @@ export async function initQdrantCollections() {
         },
       });
 
-      // 🔥 NEW: Instruct Qdrant to index the userId field for lightning-fast filtering
+      // Instruct Qdrant to index the userId field for lightning-fast filtering
       await qdrantClient.createPayloadIndex(COLLECTION_NAME, {
         field_name: 'userId',
         field_schema: 'keyword',
         wait: true,
       });
 
-      logger.info(`Successfully created Qdrant collection '${COLLECTION_NAME}' with userId index.`);
+      // 🔥 NEW: Instruct Qdrant to index the knowledgeId field for lightning-fast exclusions
+      await qdrantClient.createPayloadIndex(COLLECTION_NAME, {
+        field_name: 'knowledgeId',
+        field_schema: 'keyword',
+        wait: true,
+      });
+
+      logger.info(`Successfully created Qdrant collection '${COLLECTION_NAME}' with userId and knowledgeId indexes.`);
     } else {
       logger.info(`Qdrant collection '${COLLECTION_NAME}' already exists.`);
     }
