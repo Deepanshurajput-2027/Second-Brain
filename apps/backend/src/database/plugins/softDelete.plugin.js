@@ -18,6 +18,22 @@ export const softDeletePlugin = (schema) => {
     return this.save();
   };
 
+  schema.statics.softDelete = async function (filter, userId = null) {
+    return this.findOneAndUpdate(
+      filter,
+      { isDeleted: true, deletedAt: new Date(), ...(userId && { updatedBy: userId }) },
+      { new: true }
+    ).exec();
+  };
+
+  schema.statics.restore = async function (filter, userId = null) {
+    return this.findOneAndUpdate(
+      filter,
+      { isDeleted: false, deletedAt: null, ...(userId && { updatedBy: userId }) },
+      { new: true }
+    ).exec();
+  };
+
   // Exclude soft-deleted documents from standard queries
   const excludeDeleted = function (next) {
     if (this.getFilter().isDeleted !== true && this.getFilter().isDeleted !== false) {

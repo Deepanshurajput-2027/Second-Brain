@@ -8,6 +8,7 @@ import notFoundHandler from './middleware/notFound.middleware.js';
 import errorHandler from './middleware/error.middleware.js';
 import { authRoutes } from './modules/auth/index.js';
 import { knowledgeRoutes } from './modules/knowledge/index.js';
+import { collectionsRoutes } from './modules/collections/index.js';
 
 const app = express();
 
@@ -20,6 +21,8 @@ app.use(cookieParser());
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/knowledge', knowledgeRoutes);
+app.use('/api/v1/collections', collectionsRoutes);
+app.use('/api/collections', collectionsRoutes);
 
 app.get('/api/health', (req, res) => {
   return successResponse(res, 200, 'Backend Running');
