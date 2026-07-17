@@ -30,6 +30,14 @@ const knowledgeSchema = new Schema(
     content: {
       type: String,
     },
+    summary: {
+      type: String,
+      default: '',
+    },
+    extractedText: {
+      type: String,
+      select: false,
+    },
     tags: {
       type: [String],
       default: [],

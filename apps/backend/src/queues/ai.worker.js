@@ -6,8 +6,11 @@ import { KnowledgeRepository } from '../modules/knowledge/knowledge.repository.j
 import { AI_STATUS } from '../modules/knowledge/knowledge.constants.js';
 import logger from '../utils/logger/logger.js';
 import { qdrantClient } from '../database/qdrant.config.js';
+import { ExtractorService } from '../utils/extractors/extractor.service.js';
+import { GoogleGenAI } from '@google/genai';
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5000';
+const gemini = new GoogleGenAI({}); // Automatically picks up GEMINI_API_KEY from environment
 
 const objectIdToUuid = (objectId) => {
   const padded = String(objectId).padEnd(32, '0');
@@ -29,22 +32,63 @@ const processAiJob = async (job) => {
       throw new Error(`Knowledge with ID ${knowledgeId} not found.`);
     }
 
-    const textToProcess = knowledge.content || knowledge.title;
-    if (!textToProcess) {
-      throw new Error(`Knowledge with ID ${knowledgeId} has no content or title to process.`);
+    const fallbackContent = knowledge.content || knowledge.title || '';
+    
+    // Step 1: Deep Extraction
+    const extractedText = await ExtractorService.extract(
+      knowledge.sourceType, 
+      knowledge.sourceUrl, 
+      fallbackContent
+    );
+
+    if (!extractedText) {
+      throw new Error(`Knowledge with ID ${knowledgeId} resulted in empty extraction.`);
     }
 
-    // 3. HTTP Payload Execution (10s timeout limit)
+    // Step 2: HTTP Payload Execution (10s timeout limit)
     const response = await axios.post(
       `${AI_SERVICE_URL}/api/v1/process`,
-      { text: textToProcess },
+      { text: extractedText },
       { timeout: 10000 }
     );
 
     // DEBUG LOG: See exactly what Python returns
     logger.info(`AI Microservice Response Raw Data: ${JSON.stringify(response.data)}`);
 
-    const { embedding, tags } = response.data;
+    let { embedding, tags: pythonTags } = response.data;
+    if (Array.isArray(embedding) && Array.isArray(embedding[0])) {
+      embedding = embedding[0]; // Flatten if 2D
+    }
+
+   // Step 3 & 4: Gemini LLM for Summary and Tags
+    let summary = '';
+    let finalTags = pythonTags || [];
+    try {
+      logger.info(`Calling Gemini for summary and tags...`);
+      // Reduced to 8000 chars to save input tokens!
+      const geminiPrompt = `Analyze this text. Return a strict raw JSON object with no markdown formatting containing exactly two keys: 'summary' (a concise 2-sentence TL;DR) and 'tags' (an array of 3 to 5 lowercase keyword strings).\n\nText: ${extractedText.substring(0, 8000)}`;
+      
+      const geminiResponse = await gemini.models.generateContent({
+        model: 'gemini-3.1-flash-lite', // 🔥 The highly efficient, free-tier model
+        contents: geminiPrompt,
+      });
+
+      let jsonStr = geminiResponse.text.trim();
+      // Remove any accidental markdown backticks
+      if (jsonStr.startsWith('```json')) jsonStr = jsonStr.slice(7);
+      if (jsonStr.startsWith('```')) jsonStr = jsonStr.slice(3);
+      if (jsonStr.endsWith('```')) jsonStr = jsonStr.slice(0, -3);
+
+      const parsed = JSON.parse(jsonStr.trim());
+      summary = parsed.summary || '';
+      if (parsed.tags && Array.isArray(parsed.tags)) {
+        finalTags = parsed.tags;
+      }
+      logger.info(`Gemini successfully extracted summary and tags.`);
+    } catch (llmError) {
+      logger.error(`Gemini LLM extraction failed, degrading gracefully: ${llmError.message}`);
+      // Don't crash the queue, degrade gracefully
+    }
 
     // 4. Qdrant Vector Upsert
     if (embedding && embedding.length > 0) {
@@ -66,7 +110,9 @@ const processAiJob = async (job) => {
 
     // 5. Database Integration
     await KnowledgeRepository.updateKnowledge(knowledgeId, { 
-      tags: tags || [],
+      tags: finalTags,
+      summary,
+      extractedText,
       metadata: {
         ...(knowledge.metadata || {}),
         embedding: embedding || []

@@ -105,3 +105,64 @@ export const searchKnowledgeHandler = asyncHandler(async (req, res) => {
 
   return successResponse(res, 200, 'Semantic search completed successfully', { items: populatedDocs });
 });
+
+/**
+ * Find related/clustered knowledge items
+ */
+export const getRelatedKnowledgeHandler = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user.id || req.user._id;
+
+  // 1. Fetch the source document
+  const sourceDoc = await KnowledgeRepository.findKnowledgeById(id);
+  
+  if (!sourceDoc) {
+    return res.status(404).json({ success: false, message: 'Source knowledge item not found' });
+  }
+  
+  if (String(sourceDoc.userId) !== String(userId)) {
+    return res.status(403).json({ success: false, message: 'Unauthorized access to this knowledge item' });
+  }
+
+  const embedding = sourceDoc.metadata?.embedding;
+  if (!embedding || embedding.length === 0) {
+    return successResponse(res, 200, 'No related items found (missing embedding)', { items: [] });
+  }
+
+  // 2. Query Qdrant for Clustered Neighbors
+  let qdrantResults;
+  try {
+    qdrantResults = await qdrantClient.search('knowledge_vectors', {
+      vector: embedding,
+      limit: 3,
+      filter: {
+        must: [
+          { key: 'userId', match: { value: String(userId) } }
+        ],
+        must_not: [
+          { key: 'knowledgeId', match: { value: String(id) } }
+        ]
+      }
+    });
+  } catch (error) {
+    console.error("--- QDRANT REJECTED SEARCH ---", error);
+    return res.status(500).json({
+      success: false,
+      message: 'Vector database rejected the search query.',
+      details: error.message
+    });
+  }
+
+  const knowledgeIds = qdrantResults.map(item => item.payload.knowledgeId);
+
+  // 3. Hydrate from MongoDB
+  let populatedDocs = [];
+  if (knowledgeIds.length > 0) {
+    populatedDocs = await KnowledgeRepository.find({ _id: { $in: knowledgeIds } });
+
+    const orderMap = new Map(knowledgeIds.map((kid, index) => [String(kid), index]));
+    populatedDocs.sort((a, b) => orderMap.get(String(a._id)) - orderMap.get(String(b._id)));
+  }
+
+  return successResponse(res, 200, 'Related knowledge items retrieved successfully', { items: populatedDocs });
+});
