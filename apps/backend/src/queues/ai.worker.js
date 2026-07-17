@@ -5,8 +5,14 @@ import { aiQueueName } from './ai.queue.js';
 import { KnowledgeRepository } from '../modules/knowledge/knowledge.repository.js';
 import { AI_STATUS } from '../modules/knowledge/knowledge.constants.js';
 import logger from '../utils/logger/logger.js';
+import { qdrantClient } from '../database/qdrant.config.js';
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:5000';
+
+const objectIdToUuid = (objectId) => {
+  const padded = String(objectId).padEnd(32, '0');
+  return `${padded.slice(0, 8)}-${padded.slice(8, 12)}-${padded.slice(12, 16)}-${padded.slice(16, 20)}-${padded.slice(20, 32)}`;
+};
 
 const processAiJob = async (job) => {
   const { knowledgeId, userId } = job.data;
@@ -40,7 +46,25 @@ const processAiJob = async (job) => {
 
     const { embedding, tags } = response.data;
 
-    // 4. Database Integration
+    // 4. Qdrant Vector Upsert
+    if (embedding && embedding.length > 0) {
+      await qdrantClient.upsert('knowledge_vectors', {
+        wait: true,
+        points: [{
+          id: objectIdToUuid(knowledgeId),
+          vector: embedding,
+          payload: {
+            knowledgeId: String(knowledgeId),
+            userId: String(userId),
+            title: knowledge.title || '',
+            sourceType: knowledge.sourceType || 'unknown'
+          }
+        }]
+      });
+      logger.info(`Successfully upserted vector to Qdrant for knowledgeId: ${knowledgeId}`);
+    }
+
+    // 5. Database Integration
     await KnowledgeRepository.updateKnowledge(knowledgeId, { 
       tags: tags || [],
       metadata: {
