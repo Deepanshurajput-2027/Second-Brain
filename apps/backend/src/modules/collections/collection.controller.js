@@ -38,6 +38,7 @@ export const updateCollectionHandler = asyncHandler(async (req, res) => {
  * Soft delete a collection
  */
 export const deleteCollectionHandler = asyncHandler(async (req, res) => {
+  console.log(`[deleteCollectionHandler] Deleting collection ${req.params.id} for user ${req.user.id}`);
   await CollectionService.deleteCollection(req.user.id, req.params.id);
   return successResponse(res, 200, 'Collection deleted successfully');
 });

@@ -34,9 +34,18 @@ const collectionSchema = new Schema(
     knowledgeItems: [
       {
         type: Schema.Types.ObjectId,
-        ref: 'Knowledge',
+        ref: 'Memory',
       },
     ],
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',

@@ -4,6 +4,19 @@
  */
 
 export const softDeletePlugin = (schema) => {
+  // Ensure soft delete fields exist on any schema using this plugin
+  schema.add({
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+  });
+
   schema.methods.softDelete = async function (userId = null) {
     this.isDeleted = true;
     this.deletedAt = new Date();

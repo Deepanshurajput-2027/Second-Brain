@@ -62,6 +62,15 @@ const userSchema = new Schema(
       type: String,
       default: null,
     },
+    resetPasswordToken: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    resetPasswordExpires: {
+      type: Date,
+      default: null,
+    },
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
@@ -80,6 +89,8 @@ const userSchema = new Schema(
       virtuals: true,
       transform: (doc, ret) => {
         delete ret.password;
+        delete ret.resetPasswordToken;
+        delete ret.resetPasswordExpires;
         return ret;
       },
     },
@@ -87,6 +98,8 @@ const userSchema = new Schema(
       virtuals: true,
       transform: (doc, ret) => {
         delete ret.password;
+        delete ret.resetPasswordToken;
+        delete ret.resetPasswordExpires;
         return ret;
       },
     },

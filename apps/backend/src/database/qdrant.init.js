@@ -16,7 +16,7 @@ export async function initQdrantCollections() {
 
       await qdrantClient.createCollection(COLLECTION_NAME, {
         vectors: {
-          size: 384, // Matching HuggingFace all-MiniLM-L6-v2 output dimensions
+          size: 3072, // Updated for gemini-embedding-2 dimensions
           distance: 'Cosine',
         },
       });

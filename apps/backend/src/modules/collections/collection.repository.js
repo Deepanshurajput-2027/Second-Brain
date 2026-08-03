@@ -56,9 +56,10 @@ export class CollectionRepository {
   /**
    * Soft delete a collection
    * @param {string} id - The collection ID
+   * @param {string} [userId=null] - The user ID performing deletion
    * @returns {Promise<Object|null>}
    */
-  static async softDeleteCollection(id) {
-    return Collection.softDelete({ _id: id });
+  static async softDeleteCollection(id, userId = null) {
+    return Collection.softDelete({ _id: id }, userId);
   }
 }
