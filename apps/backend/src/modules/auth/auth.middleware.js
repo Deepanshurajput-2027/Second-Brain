@@ -24,6 +24,7 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
   // Attach user identity to request object
   req.user = {
     id: decoded.sub,
+    _id: decoded.sub,
     role: decoded.role,
   };
 

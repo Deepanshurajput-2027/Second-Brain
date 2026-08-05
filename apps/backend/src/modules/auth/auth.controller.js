@@ -10,6 +10,12 @@ const cookieOptions = {
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in milliseconds
 };
 
+const clearCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'Strict',
+};
+
 export const registerHandler = asyncHandler(async (req, res) => {
   const user = await AuthService.register(req.body);
   return successResponse(res, 201, 'User registered successfully', { user });
@@ -47,6 +53,24 @@ export const logoutHandler = asyncHandler(async (req, res) => {
     }
   }
 
-  res.clearCookie('refreshToken', cookieOptions);
+  res.clearCookie('refreshToken', clearCookieOptions);
   return successResponse(res, 200, 'Logout successful');
 });
+
+export const forgotPasswordHandler = asyncHandler(async (req, res) => {
+  const { email } = req.body;
+  await AuthService.forgotPassword(email);
+  return successResponse(
+    res,
+    200,
+    'If an account exists with that email, a password reset link has been sent.'
+  );
+});
+
+export const resetPasswordHandler = asyncHandler(async (req, res) => {
+  const token = req.params.token || req.body.token;
+  const newPassword = req.body.newPassword || req.body.password;
+  await AuthService.resetPassword(token, newPassword);
+  return successResponse(res, 200, 'Password has been reset successfully');
+});
+

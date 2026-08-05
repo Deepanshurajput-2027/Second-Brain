@@ -1,5 +1,5 @@
 import { CollectionRepository } from './collection.repository.js';
-import { KnowledgeRepository } from '../knowledge/knowledge.repository.js';
+import Memory from '../memory/memory.model.js';
 import { ApiError } from '../../shared/errors/ApiError.js';
 
 /**
@@ -79,7 +79,7 @@ export class CollectionService {
    */
   static async deleteCollection(userId, collectionId) {
     await this.getCollectionById(userId, collectionId);
-    return CollectionRepository.softDeleteCollection(collectionId);
+    return CollectionRepository.softDeleteCollection(collectionId, userId);
   }
 
   /**
@@ -92,12 +92,12 @@ export class CollectionService {
     const collection = await this.getCollectionById(userId, collectionId);
 
     // Verify knowledge item exists and belongs to this user
-    const item = await KnowledgeRepository.findKnowledgeById(knowledgeId);
-    if (!item || item.isDeleted) {
+    const item = await Memory.findById(knowledgeId);
+    if (!item) {
       throw new ApiError(404, 'Knowledge item not found');
     }
 
-    if (item.userId.toString() !== userId.toString()) {
+    if (item.user.toString() !== userId.toString()) {
       throw new ApiError(403, 'Forbidden: You do not have access to this knowledge item');
     }
 
@@ -145,8 +145,7 @@ export class CollectionService {
   static async getCollectionItems(userId, collectionId) {
     const collection = await this.getCollectionById(userId, collectionId);
     await collection.populate({
-      path: 'knowledgeItems',
-      match: { isDeleted: { $ne: true } },
+      path: 'knowledgeItems'
     });
     return collection.knowledgeItems;
   }

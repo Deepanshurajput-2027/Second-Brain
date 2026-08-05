@@ -12,7 +12,10 @@ export class JwtService {
    * @returns {{ accessToken: string, refreshToken: string }} The generated tokens
    */
   static generateTokens(payload) {
-    const accessToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+    if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+      console.error('Critical: JWT secrets are missing from environment variables');
+    }
+    const accessToken = jwt.sign(payload, process.env.JWT_SECRET, {
       expiresIn: ACCESS_TOKEN_EXPIRY,
     });
 
@@ -46,7 +49,7 @@ export class JwtService {
    */
   static verifyAccessToken(token) {
     try {
-      return jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+      return jwt.verify(token, process.env.JWT_SECRET);
     } catch (err) {
       this._handleVerifyError(err);
     }
