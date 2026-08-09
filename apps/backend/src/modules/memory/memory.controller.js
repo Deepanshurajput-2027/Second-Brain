@@ -2,9 +2,6 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 import { GoogleGenAI } from '@google/genai';
-import axios from 'axios';
-import * as cheerio from 'cheerio';
-import crypto from 'crypto';
 import Memory from './memory.model.js';
 import mongoose from 'mongoose';
 import { qdrantClient } from '../../database/qdrant.config.js';
@@ -15,50 +12,6 @@ import { withExponentialBackoff } from '../../utils/retryPrompt.js';
 
 // Initialize the Gemini client using the new SDK
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-const scrapeUrl = async (url) => {
-  try {
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    const html = response.data;
-    const $ = cheerio.load(html);
-
-    const title = $('title').text() || $('meta[property="og:title"]').attr('content') || '';
-    const description = $('meta[property="og:description"]').attr('content') || '';
-    const siteName = $('meta[property="og:site_name"]').attr('content') || '';
-
-    const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
-    if (isYouTube) return `Video Title: ${title}\n\nVideo Description: ${description}`;
-
-    $('script, style, noscript, iframe, img, svg, video').remove();
-    let extractedText = '';
-    $('article, main, p, h1, h2, h3').each((i, el) => { extractedText += $(el).text() + ' '; });
-    if (!extractedText.trim()) extractedText = $('body').text();
-
-    let cleanText = extractedText.replace(/\s+/g, ' ').trim();
-    if (cleanText.length > 8000) cleanText = cleanText.substring(0, 8000) + '...';
-
-    return `Title: ${title}\nDescription: ${description}\n\nContent:\n${cleanText}`.trim() || 'No text found.';
-  } catch (error) {
-    console.error(`Scraping failed for ${url}:`, error.message);
-    throw new Error(`Failed to scrape URL: ${url}`);
-  }
-};
-
-const parseAIResponse = (text) => {
-  try {
-    let cleanText = text.replace(/```(json)?/g, '').trim();
-    return JSON.parse(cleanText);
-  } catch (error) {
-    throw new Error('AI response was not valid JSON');
-  }
-};
-
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const ingestMemory = async (req, res) => {
   try {
@@ -171,7 +124,7 @@ export const semanticSearch = async (req, res) => {
       vector: queryVector,
       limit: 10,
       with_payload: true,
-      score_threshold: 0.4, 
+      score_threshold: 0.55, 
     });
 
     // Extract mongo_ids from the Qdrant payload
@@ -188,7 +141,8 @@ export const semanticSearch = async (req, res) => {
       .map(id => memories.find(m => m._id.toString() === id))
       .filter(Boolean);
 
-    const formatted = sortedMemories.map(m => ({
+    // Format and enforce a strict limit of 10 items
+    const formatted = sortedMemories.slice(0, 10).map(m => ({
       id: m._id.toString(),
       _id: m._id.toString(),
       url: m.url,

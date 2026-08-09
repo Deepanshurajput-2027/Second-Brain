@@ -1,6 +1,5 @@
 import { Worker } from 'bullmq';
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import crypto from 'crypto';
 import { connection } from './redis.config.js';
 import { aiQueueName } from './ai.queue.js';
@@ -9,6 +8,7 @@ import { qdrantClient } from '../database/qdrant.config.js';
 import { GoogleGenAI } from '@google/genai';
 import { withExponentialBackoff } from '../utils/retryPrompt.js';
 import logger from '../utils/logger/logger.js';
+import { ExtractorService } from '../utils/extractors/extractor.service.js';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -21,39 +21,6 @@ const parseAIResponse = (text) => {
   }
 };
 
-const scrapeUrl = async (url) => {
-  try {
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    const html = response.data;
-    const $ = cheerio.load(html);
-
-    const title = $('title').text() || $('meta[property="og:title"]').attr('content') || '';
-    const description = $('meta[property="og:description"]').attr('content') || '';
-    const siteName = $('meta[property="og:site_name"]').attr('content') || '';
-
-    const isYouTube = url.includes('youtube.com') || url.includes('youtu.be');
-    if (isYouTube) return `Video Title: ${title}\n\nVideo Description: ${description}`;
-
-    $('script, style, noscript, iframe, img, svg, video').remove();
-    let extractedText = '';
-    $('article, main, p, h1, h2, h3').each((i, el) => { extractedText += $(el).text() + ' '; });
-    if (!extractedText.trim()) extractedText = $('body').text();
-
-    let cleanText = extractedText.replace(/\s+/g, ' ').trim();
-    if (cleanText.length > 8000) cleanText = cleanText.substring(0, 8000) + '...';
-
-    return `Title: ${title}\nDescription: ${description}\n\nContent:\n${cleanText}`.trim() || 'No text found.';
-  } catch (error) {
-    logger.error(`Scraping failed for ${url}: ${error.message}`);
-    throw new Error(`Failed to scrape URL: ${url}`);
-  }
-};
-
 const processAiJob = async (job) => {
   const { memoryId, userId, url, type, mimetype } = job.data;
   logger.info(`[Worker] Starting processing for memoryId: ${memoryId}`);
@@ -61,27 +28,44 @@ const processAiJob = async (job) => {
   try {
     await Memory.findByIdAndUpdate(memoryId, { aiStatus: 'processing' });
 
-    let response;
-    
-    if (type === 'url') {
-      let scrapedText;
-      let isFallback = false;
-      let fallbackDomain = 'Saved Link';
+    let summary = '';
+    let tags = [];
+    let title = '';
 
+    if (type === 'url') {
+      let extractedText = '';
       try {
-        scrapedText = await scrapeUrl(url);
+        extractedText = await ExtractorService.scrapeUrl(url);
       } catch (scrapeError) {
-        logger.warn(`[Worker] Scrape failed for ${url}, using fallback.`);
-        isFallback = true;
-        try { 
-          fallbackDomain = new URL(url).hostname; 
+        logger.warn(`[Worker] Scrape failed for ${url}: ${scrapeError.message}`);
+        extractedText = '';
+      }
+
+      console.log(`[Scraper] Extracted text length: ${extractedText ? extractedText.length : 0}`);
+
+      // Strict Content Validation: Check if extracted text is null/empty or < 50 characters
+      if (!extractedText || extractedText.trim().length < 50) {
+        logger.info(`[Worker] Extracted text too short (< 50 chars) for memoryId: ${memoryId}. Skipping Gemini LLM.`);
+        summary = 'No readable content found.';
+        tags = [];
+
+        // Fallback title from domain or existing title
+        let fallbackDomain = 'Saved Link';
+        try {
+          fallbackDomain = new URL(url).hostname;
         } catch (e) {
           logger.warn(`[Worker] Failed to parse URL for fallback domain: ${e.message}`);
         }
-        scrapedText = `Title: ${fallbackDomain}\nDescription: This content could not be automatically scraped due to access restrictions or paywalls. Please visit the original link.\n\nContent:\nThis content could not be automatically scraped due to access restrictions or paywalls. Please visit the original link.`;
-      }
 
-      const prompt = `
+        const existingMemory = await Memory.findById(memoryId);
+        title = (existingMemory && existingMemory.title && existingMemory.title !== 'Saved Link')
+          ? existingMemory.title
+          : fallbackDomain;
+      } else {
+        // Max Token Protection: Apply strict 15,000 char slice
+        const contentForAi = extractedText.substring(0, 15000);
+
+        const prompt = `
         You are an expert technical summarizer. Read the following text scraped from a webpage and provide:
         1. A concise, 2-sentence summary of the main points.
         2. An array of 3-5 relevant tags (lowercase, single words or hyphenated).
@@ -95,16 +79,22 @@ const processAiJob = async (job) => {
         
         Text to analyze:
         """
-        ${scrapedText}
+        ${contentForAi}
         """
       `;
 
-      response = await withExponentialBackoff(() => ai.models.generateContent({
-        model: 'gemini-3.5-flash-lite',
-        contents: prompt,
-        config: { responseMimeType: 'application/json' }
-      }));
-      
+        const response = await withExponentialBackoff(() => ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: prompt,
+          config: { responseMimeType: 'application/json' }
+        }));
+
+        const parsedData = parseAIResponse(response.text);
+        summary = parsedData.summary || 'No readable content found.';
+        tags = Array.isArray(parsedData.tags) ? parsedData.tags : [];
+        title = parsedData.title || '';
+      }
+
     } else if (type === 'file') {
       const fileResponse = await axios.get(url, { responseType: 'arraybuffer' });
       const buffer = Buffer.from(fileResponse.data, 'binary');
@@ -122,7 +112,7 @@ const processAiJob = async (job) => {
         }
       `;
 
-      response = await withExponentialBackoff(() => ai.models.generateContent({
+      const response = await withExponentialBackoff(() => ai.models.generateContent({
         model: 'gemini-3.5-flash-lite',
         contents: [
           {
@@ -135,24 +125,33 @@ const processAiJob = async (job) => {
         ],
         config: { responseMimeType: 'application/json' }
       }));
+
+      const parsedData = parseAIResponse(response.text);
+      summary = parsedData.summary || 'No readable content found.';
+      tags = Array.isArray(parsedData.tags) ? parsedData.tags : [];
+      title = parsedData.title || '';
     }
 
-    const parsedData = parseAIResponse(response.text);
+    // Save summary, tags, title, and aiStatus to MongoDB
+    const updatePayload = {
+      summary,
+      tags,
+      aiStatus: 'completed'
+    };
+    if (title) {
+      updatePayload.title = title;
+    }
 
-    // Save summary and tags to MongoDB
-    const updatedMemory = await Memory.findByIdAndUpdate(memoryId, {
-      summary: parsedData.summary,
-      tags: parsedData.tags,
-      title: parsedData.title,
-    }, { new: true });
+    const updatedMemory = await Memory.findByIdAndUpdate(memoryId, updatePayload, { new: true });
 
-    // Qdrant Embeddings
+    // Qdrant Embeddings Upsert
     try {
-      const textToEmbed = `Title: ${updatedMemory.title}\nSummary: ${updatedMemory.summary}\nTags: ${updatedMemory.tags.join(', ')}`;
+      const tagString = (updatedMemory.tags && updatedMemory.tags.length > 0) ? updatedMemory.tags.join(', ') : '';
+      const textToEmbed = `Title: ${updatedMemory.title || ''}\nSummary: ${updatedMemory.summary || ''}\nTags: ${tagString}`.trim();
       
       const embeddingRes = await withExponentialBackoff(() => ai.models.embedContent({
         model: 'gemini-embedding-2',
-        contents: textToEmbed,
+        contents: textToEmbed || 'Memory',
       }));
 
       const vector = embeddingRes.embeddings[0].values;
@@ -173,11 +172,10 @@ const processAiJob = async (job) => {
       logger.info(`[Worker] Successfully upserted vector for memoryId: ${memoryId}`);
     } catch (embeddingError) {
       logger.error(`[Worker] Failed to generate/upsert embedding for ${memoryId}: ${embeddingError.message}`);
-      // Throw the error so the entire job fails and MongoDB doesn't get out of sync with a 'completed' status
+      // Throw the error so BullMQ can track retries or mark failed
       throw embeddingError;
     }
 
-    await Memory.findByIdAndUpdate(memoryId, { aiStatus: 'completed' });
     logger.info(`[Worker] Finished processing for memoryId: ${memoryId}`);
 
   } catch (error) {
