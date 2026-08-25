@@ -5,7 +5,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "<REPLACE_WITH_GITHUB_REPOSITORY>"
+    "url": "https://github.com/Deepanshurajput-2027/Second-Brain"
   },
   "license": "MIT",
   "keywords": [
