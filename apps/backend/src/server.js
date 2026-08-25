@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import app from './app.js';
+import './queues/ai.worker.js';
 import connectDatabase from './config/database.config.js';
 import { validateEnv } from './shared/validators/envValidator.js';
 import logger from './utils/logger/logger.js';
