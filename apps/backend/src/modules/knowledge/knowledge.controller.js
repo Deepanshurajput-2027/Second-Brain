@@ -72,8 +72,8 @@ export const searchKnowledgeHandler = asyncHandler(async (req, res) => {
   // 2. Query Qdrant for Nearest Neighbors
   let qdrantResults;
   try {
-    qdrantResults = await qdrantClient.search('knowledge_vectors', {
-      vector: embedding,
+    qdrantResults = await qdrantClient.query('knowledge_vectors', {
+      query: embedding,
       limit: 5,
       filter: {
         must: [
@@ -132,8 +132,8 @@ export const getRelatedKnowledgeHandler = asyncHandler(async (req, res) => {
   // 2. Query Qdrant for Clustered Neighbors
   let qdrantResults;
   try {
-    qdrantResults = await qdrantClient.search('knowledge_vectors', {
-      vector: embedding,
+    qdrantResults = await qdrantClient.query('knowledge_vectors', {
+      query: embedding,
       limit: 3,
       filter: {
         must: [

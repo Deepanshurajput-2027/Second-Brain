@@ -120,8 +120,8 @@ export const semanticSearch = async (req, res) => {
     }));
     const queryVector = embeddingRes.embeddings[0].values;
 
-    const searchResults = await qdrantClient.search('knowledge_vectors', {
-      vector: queryVector,
+    const searchResults = await qdrantClient.query('knowledge_vectors', {
+      query: queryVector,
       limit: 10,
       with_payload: true,
       score_threshold: 0.55, 

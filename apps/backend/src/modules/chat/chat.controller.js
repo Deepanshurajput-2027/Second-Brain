@@ -25,8 +25,8 @@ export const chatWithBrain = async (req, res) => {
     const queryVector = embeddingRes.embeddings[0].values;
 
     // Step 2: Query Qdrant for top relevant memory chunks
-    const searchResults = await qdrantClient.search('knowledge_vectors', {
-      vector: queryVector,
+    const searchResults = await qdrantClient.query('knowledge_vectors', {
+      query: queryVector,
       limit: 5,
     });
 
