@@ -30,7 +30,7 @@
     "check": "turbo run check",
     "test": "turbo run test",
     "clean": "turbo run clean && rimraf node_modules",
-    "prepare": "husky install"
+    "prepare": "husky || true"
   },
   "devDependencies": {
     "@commitlint/cli": "^19.0.0",
