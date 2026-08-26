@@ -91,7 +91,7 @@ export const searchKnowledgeHandler = asyncHandler(async (req, res) => {
   }
 
   // Extract the original MongoDB ObjectIDs from the Qdrant payload
-  const knowledgeIds = qdrantResults.map(item => item.payload.knowledgeId);
+  const knowledgeIds = (qdrantResults.points || []).map(item => item.payload.knowledgeId);
 
   // 3. Hydrate from MongoDB
   let populatedDocs = [];
@@ -153,7 +153,7 @@ export const getRelatedKnowledgeHandler = asyncHandler(async (req, res) => {
     });
   }
 
-  const knowledgeIds = qdrantResults.map(item => item.payload.knowledgeId);
+  const knowledgeIds = (qdrantResults.points || []).map(item => item.payload.knowledgeId);
 
   // 3. Hydrate from MongoDB
   let populatedDocs = [];

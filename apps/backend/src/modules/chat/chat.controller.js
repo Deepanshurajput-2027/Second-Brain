@@ -30,7 +30,7 @@ export const chatWithBrain = async (req, res) => {
       limit: 5,
     });
 
-    if (!searchResults || searchResults.length === 0) {
+    if (!searchResults || !searchResults.points || searchResults.points.length === 0) {
       return res.status(200).json({ 
         role: 'ai', 
         content: "I couldn't find any relevant memories in your Second Brain to answer that question." 
@@ -38,7 +38,7 @@ export const chatWithBrain = async (req, res) => {
     }
 
     // Step 3: Fetch full metadata from MongoDB
-    const memoryIds = searchResults.map(result => result.payload.mongo_id);
+    const memoryIds = searchResults.points.map(result => result.payload.mongo_id);
     const memories = await Memory.find({ _id: { $in: memoryIds } });
 
     // Combine memory summaries into context string

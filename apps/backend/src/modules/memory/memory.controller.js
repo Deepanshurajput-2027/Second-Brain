@@ -128,7 +128,7 @@ export const semanticSearch = async (req, res) => {
     });
 
     // Extract mongo_ids from the Qdrant payload
-    const extractedIds = searchResults.map(hit => hit.payload?.mongo_id).filter(Boolean);
+    const extractedIds = (searchResults.points || []).map(hit => hit.payload?.mongo_id).filter(Boolean);
 
     // Cast strings to mongoose ObjectIds to ensure the $in query works correctly
     const objectIds = extractedIds.map(id => new mongoose.Types.ObjectId(id));
