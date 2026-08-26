@@ -75,6 +75,7 @@ export const searchKnowledgeHandler = asyncHandler(async (req, res) => {
     qdrantResults = await qdrantClient.query('knowledge_vectors', {
       query: embedding,
       limit: 5,
+      with_payload: true,
       filter: {
         must: [
           { key: 'userId', match: { value: String(userId) } }
@@ -91,7 +92,7 @@ export const searchKnowledgeHandler = asyncHandler(async (req, res) => {
   }
 
   // Extract the original MongoDB ObjectIDs from the Qdrant payload
-  const knowledgeIds = (qdrantResults.points || []).map(item => item.payload.knowledgeId);
+  const knowledgeIds = (qdrantResults.points || []).map(item => item.payload?.knowledgeId).filter(Boolean);
 
   // 3. Hydrate from MongoDB
   let populatedDocs = [];
@@ -135,6 +136,7 @@ export const getRelatedKnowledgeHandler = asyncHandler(async (req, res) => {
     qdrantResults = await qdrantClient.query('knowledge_vectors', {
       query: embedding,
       limit: 3,
+      with_payload: true,
       filter: {
         must: [
           { key: 'userId', match: { value: String(userId) } }
@@ -153,7 +155,7 @@ export const getRelatedKnowledgeHandler = asyncHandler(async (req, res) => {
     });
   }
 
-  const knowledgeIds = (qdrantResults.points || []).map(item => item.payload.knowledgeId);
+  const knowledgeIds = (qdrantResults.points || []).map(item => item.payload?.knowledgeId).filter(Boolean);
 
   // 3. Hydrate from MongoDB
   let populatedDocs = [];

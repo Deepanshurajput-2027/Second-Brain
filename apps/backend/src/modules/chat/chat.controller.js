@@ -28,6 +28,7 @@ export const chatWithBrain = async (req, res) => {
     const searchResults = await qdrantClient.query('knowledge_vectors', {
       query: queryVector,
       limit: 5,
+      with_payload: true,
     });
 
     if (!searchResults || !searchResults.points || searchResults.points.length === 0) {
@@ -38,7 +39,7 @@ export const chatWithBrain = async (req, res) => {
     }
 
     // Step 3: Fetch full metadata from MongoDB
-    const memoryIds = searchResults.points.map(result => result.payload.mongo_id);
+    const memoryIds = searchResults.points.map(result => result.payload?.mongo_id).filter(Boolean);
     const memories = await Memory.find({ _id: { $in: memoryIds } });
 
     // Combine memory summaries into context string
