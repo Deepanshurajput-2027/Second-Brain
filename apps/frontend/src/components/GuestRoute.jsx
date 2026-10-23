@@ -7,7 +7,7 @@ export const GuestRoute = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-gray-900 flex items-center justify-center font-sans">
+      <div className="fixed inset-0 z-50 bg-white dark:bg-gray-900 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <svg className="animate-spin h-10 w-10 text-emerald-500" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />

@@ -10,7 +10,7 @@ export class PasswordService {
    * @returns {Promise<string>} The resulting bcrypt hash
    */
   static async hashPassword(plainPassword) {
-    const saltRounds = 12;
+    const saltRounds = 10; // 10 is the industry standard — fast (~100ms) but still 2^10 rounds secure
     return bcrypt.hash(plainPassword, saltRounds);
   }
 

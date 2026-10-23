@@ -6,18 +6,45 @@ import { aiQueueName } from './ai.queue.js';
 import Memory from '../modules/memory/memory.model.js';
 import { qdrantClient } from '../database/qdrant.config.js';
 import { GoogleGenAI } from '@google/genai';
-import { withExponentialBackoff } from '../utils/retryPrompt.js';
 import logger from '../utils/logger/logger.js';
 import { ExtractorService } from '../utils/extractors/extractor.service.js';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Exponential backoff — retries on 429, 500, 503 and timeouts
+const withRetry = async (fn, maxRetries = 3, initialDelay = 1500) => {
+  let delay = initialDelay;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err.status || err.response?.status || err?.error?.code;
+      const isRetryable = status === 429 || status === 503 || status === 500
+        || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT'
+        || err.message?.includes('overloaded') || err.message?.includes('timeout');
+
+      if (isRetryable && attempt < maxRetries) {
+        logger.warn(`[Worker] Retryable error (${err.message}), attempt ${attempt + 1}/${maxRetries}. Waiting ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+        delay *= 2;
+      } else {
+        throw err;
+      }
+    }
+  }
+};
 
 const parseAIResponse = (text) => {
   try {
     let cleanText = text.replace(/```(json)?/g, '').trim();
     return JSON.parse(cleanText);
   } catch (error) {
-    throw new Error('AI response was not valid JSON');
+    // Try extracting JSON from within the response
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch (_) {}
+    }
+    throw new Error(`AI response was not valid JSON. Raw: ${text?.slice(0, 200)}`);
   }
 };
 
@@ -41,53 +68,55 @@ const processAiJob = async (job) => {
         extractedText = '';
       }
 
-      console.log(`[Scraper] Extracted text length: ${extractedText ? extractedText.length : 0}`);
+      logger.info(`[Worker] Extracted text length: ${extractedText?.length ?? 0} for memoryId: ${memoryId}`);
 
-      // Strict Content Validation: Check if extracted text is null/empty or < 50 characters
       if (!extractedText || extractedText.trim().length < 50) {
-        logger.info(`[Worker] Extracted text too short (< 50 chars) for memoryId: ${memoryId}. Skipping Gemini LLM.`);
-        summary = 'No readable content found.';
-        tags = [];
-
-        // Fallback title from domain or existing title
+        // Content too short — use domain as title, but still try to tag via URL metadata
+        logger.info(`[Worker] Content too short, using domain fallback for memoryId: ${memoryId}`);
         let fallbackDomain = 'Saved Link';
-        try {
-          fallbackDomain = new URL(url).hostname;
-        } catch (e) {
-          logger.warn(`[Worker] Failed to parse URL for fallback domain: ${e.message}`);
-        }
-
+        try { fallbackDomain = new URL(url).hostname; } catch (_) {}
         const existingMemory = await Memory.findById(memoryId);
-        title = (existingMemory && existingMemory.title && existingMemory.title !== 'Saved Link')
-          ? existingMemory.title
-          : fallbackDomain;
+        title = (existingMemory?.title && existingMemory.title !== 'Saved Link')
+          ? existingMemory.title : fallbackDomain;
+        summary = 'Content could not be extracted from this source.';
+        tags = [];
       } else {
-        // Max Token Protection: Apply strict 15,000 char slice
-        const contentForAi = extractedText.substring(0, 15000);
+        // Limit to 12,000 chars to stay well within token limits
+        const contentForAi = extractedText.substring(0, 12000);
 
-        const prompt = `
-        You are an expert technical summarizer. Read the following text scraped from a webpage and provide:
-        1. A concise, 2-sentence summary of the main points.
-        2. An array of 3-5 relevant tags (lowercase, single words or hyphenated).
-        
-        Respond STRICTLY with a valid JSON object matching this structure:
-        {
-          "summary": "The 2 sentence summary here.",
-          "tags": ["tag1", "tag2", "tag3"],
-          "title": "Extracted or inferred title"
+        const prompt = `You are an expert technical summarizer. Read the following text and provide:
+1. A concise 2-sentence summary.
+2. An array of 3-5 relevant lowercase tags (single words or hyphenated).
+
+Respond ONLY with a valid JSON object:
+{"summary": "...", "tags": ["tag1", "tag2"], "title": "..."}
+
+Text:
+"""
+${contentForAi}
+"""`;
+
+        let response;
+        try {
+          response = await withRetry(() => ai.models.generateContent({
+            model: 'gemini-3.5-flash-lite',
+            contents: prompt,
+            config: { responseMimeType: 'application/json' }
+          }));
+        } catch (llmError) {
+          // LLM failed — use domain as fallback instead of crashing the job
+          logger.warn(`[Worker] LLM generation failed for ${memoryId}: ${llmError.message}. Using content fallback.`);
+          let fallbackDomain = 'Saved Link';
+          try { fallbackDomain = new URL(url).hostname; } catch (_) {}
+          const existingMemory = await Memory.findById(memoryId);
+          title = existingMemory?.title || fallbackDomain;
+          summary = 'AI summarization temporarily unavailable. Content saved successfully.';
+          tags = [];
+
+          // Still save and embed what we have — don't fail the job
+          await saveAndEmbed(memoryId, { summary, tags, title });
+          return;
         }
-        
-        Text to analyze:
-        """
-        ${contentForAi}
-        """
-      `;
-
-        const response = await withExponentialBackoff(() => ai.models.generateContent({
-          model: 'gemini-3.5-flash-lite',
-          contents: prompt,
-          config: { responseMimeType: 'application/json' }
-        }));
 
         const parsedData = parseAIResponse(response.text);
         summary = parsedData.summary || 'No readable content found.';
@@ -96,35 +125,35 @@ const processAiJob = async (job) => {
       }
 
     } else if (type === 'file') {
-      const fileResponse = await axios.get(url, { responseType: 'arraybuffer' });
+      const fileResponse = await axios.get(url, { responseType: 'arraybuffer', timeout: 15000 });
       const buffer = Buffer.from(fileResponse.data, 'binary');
 
-      const prompt = `
-        You are an expert technical summarizer. Read the following uploaded file and provide:
-        1. A concise, 2-sentence summary of the main points.
-        2. An array of 3-5 relevant tags (lowercase, single words or hyphenated).
-        
-        Respond STRICTLY with a valid JSON object matching this structure:
-        {
-          "summary": "The 2 sentence summary here.",
-          "tags": ["tag1", "tag2", "tag3"],
-          "title": "Extracted or inferred title"
-        }
-      `;
+      const prompt = `You are an expert technical summarizer. Read the uploaded file and provide:
+1. A concise 2-sentence summary.
+2. An array of 3-5 relevant lowercase tags.
 
-      const response = await withExponentialBackoff(() => ai.models.generateContent({
-        model: 'gemini-3.5-flash-lite',
-        contents: [
-          {
-            inlineData: {
-              data: buffer.toString('base64'),
-              mimeType: mimetype
-            }
-          },
-          prompt
-        ],
-        config: { responseMimeType: 'application/json' }
-      }));
+Respond ONLY with a valid JSON object:
+{"summary": "...", "tags": ["tag1", "tag2"], "title": "..."}`;
+
+      let response;
+      try {
+        response = await withRetry(() => ai.models.generateContent({
+          model: 'gemini-3.5-flash-lite',
+          contents: [
+            { inlineData: { data: buffer.toString('base64'), mimeType: mimetype } },
+            prompt
+          ],
+          config: { responseMimeType: 'application/json' }
+        }));
+      } catch (llmError) {
+        logger.warn(`[Worker] LLM generation failed for file ${memoryId}: ${llmError.message}. Using filename fallback.`);
+        const existingMemory = await Memory.findById(memoryId);
+        title = existingMemory?.title || 'Uploaded File';
+        summary = 'AI summarization temporarily unavailable. File saved successfully.';
+        tags = [];
+        await saveAndEmbed(memoryId, { summary, tags, title });
+        return;
+      }
 
       const parsedData = parseAIResponse(response.text);
       summary = parsedData.summary || 'No readable content found.';
@@ -132,55 +161,8 @@ const processAiJob = async (job) => {
       title = parsedData.title || '';
     }
 
-    // Step 1: Save summary, tags, title to MongoDB (keep aiStatus as 'processing' until vector is stored)
-    const updatePayload = {
-      summary,
-      tags,
-    };
-    if (title) {
-      updatePayload.title = title;
-    }
-
-    const updatedMemory = await Memory.findByIdAndUpdate(memoryId, updatePayload, { new: true });
-
-    // Step 2: Generate embedding and upsert to Qdrant
-    // Only mark aiStatus='completed' AFTER the vector is safely stored
-    try {
-      const tagString = (updatedMemory.tags && updatedMemory.tags.length > 0) ? updatedMemory.tags.join(', ') : '';
-      const textToEmbed = `Title: ${updatedMemory.title || ''}\nSummary: ${updatedMemory.summary || ''}\nTags: ${tagString}`.trim();
-      
-      const embeddingRes = await withExponentialBackoff(() => ai.models.embedContent({
-        model: 'gemini-embedding-2',
-        contents: textToEmbed || 'Memory',
-      }));
-
-      const vector = embeddingRes.embeddings[0].values;
-      const pointId = crypto.randomUUID();
-
-      await qdrantClient.upsert('knowledge_vectors', {
-        wait: true,
-        points: [
-          {
-            id: pointId,
-            vector: vector,
-            payload: {
-              mongo_id: memoryId,
-            }
-          }
-        ]
-      });
-      logger.info(`[Worker] Successfully upserted vector for memoryId: ${memoryId}`);
-
-      // Step 3: Only now mark as completed — summary, tags, AND vector are all persisted
-      await Memory.findByIdAndUpdate(memoryId, { aiStatus: 'completed' });
-    } catch (embeddingError) {
-      logger.error(`[Worker] Failed to generate/upsert embedding for ${memoryId}: ${embeddingError.message}`);
-      // Throw the error so BullMQ can retry or mark the job as failed
-      throw embeddingError;
-    }
-
+    await saveAndEmbed(memoryId, { summary, tags, title });
     logger.info(`[Worker] Finished processing for memoryId: ${memoryId}`);
-
 
   } catch (error) {
     logger.error(`[Worker] Error processing job for memoryId ${memoryId}: ${error.message}`);
@@ -188,8 +170,53 @@ const processAiJob = async (job) => {
   }
 };
 
+/**
+ * Saves summary/tags/title to MongoDB, generates embedding, upserts to Qdrant,
+ * and only then marks aiStatus='completed'.
+ */
+const saveAndEmbed = async (memoryId, { summary, tags, title }) => {
+  // Step 1: Save content fields (keep status as 'processing')
+  const updatePayload = { summary, tags };
+  if (title) updatePayload.title = title;
+
+  const updatedMemory = await Memory.findByIdAndUpdate(memoryId, updatePayload, { new: true });
+
+  // Step 2: Generate embedding and upsert to Qdrant
+  try {
+    const tagString = updatedMemory.tags?.length > 0 ? updatedMemory.tags.join(', ') : '';
+    const textToEmbed = `Title: ${updatedMemory.title || ''}\nSummary: ${updatedMemory.summary || ''}\nTags: ${tagString}`.trim();
+
+    const embeddingRes = await withRetry(() => ai.models.embedContent({
+      model: 'gemini-embedding-2',
+      contents: textToEmbed || 'Memory',
+    }));
+
+    const vector = embeddingRes.embeddings[0].values;
+    const pointId = crypto.randomUUID();
+
+    await qdrantClient.upsert('knowledge_vectors', {
+      wait: true,
+      points: [{ id: pointId, vector, payload: { mongo_id: memoryId } }]
+    });
+
+    logger.info(`[Worker] Successfully upserted vector for memoryId: ${memoryId}`);
+  } catch (embeddingError) {
+    logger.error(`[Worker] Embedding/Qdrant failed for ${memoryId}: ${embeddingError.message}`);
+    // Mark as completed anyway — user still has their summary/tags
+    // Semantic search won't work for this item but the rest of the app will
+    await Memory.findByIdAndUpdate(memoryId, { aiStatus: 'completed' });
+    return;
+  }
+
+  // Step 3: Mark as completed only after vector is safely stored
+  await Memory.findByIdAndUpdate(memoryId, { aiStatus: 'completed' });
+};
+
 export const startAiWorker = () => {
-  const worker = new Worker(aiQueueName, processAiJob, { connection });
+  const worker = new Worker(aiQueueName, processAiJob, {
+    connection,
+    concurrency: 2, // Process up to 2 jobs simultaneously
+  });
 
   worker.on('completed', (job) => {
     logger.info(`[Worker] Job ${job.id} completed!`);
