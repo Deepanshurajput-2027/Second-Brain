@@ -42,6 +42,11 @@ export const ingestMemory = async (req, res) => {
       userId: req.user._id.toString(),
       url: url,
       type: 'url'
+    }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: true,
+      removeOnFail: false,
     });
 
     return res.status(202).json({
@@ -223,6 +228,11 @@ export const uploadMemory = async (req, res) => {
       url: secureUrl,
       mimetype,
       type: 'file'
+    }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2000 },
+      removeOnComplete: true,
+      removeOnFail: false,
     });
 
     return res.status(202).json({
@@ -245,11 +255,19 @@ export const getMemoryStatus = async (req, res) => {
   try {
     const memory = await Memory.findOne({ _id: req.params.id, user: req.user._id });
     if (!memory) return res.status(404).json({ message: 'Memory not found' });
-    
+
+    // Return full memory document so the frontend can hydrate tags/summary
+    // on completion without requiring a full page reload
     return res.status(200).json({
       _id: memory._id.toString(),
       id: memory._id.toString(),
-      aiStatus: memory.aiStatus
+      aiStatus: memory.aiStatus,
+      title: memory.title,
+      summary: memory.summary,
+      tags: memory.tags,
+      sourceType: memory.sourceType,
+      url: memory.url,
+      createdAt: memory.createdAt,
     });
   } catch (error) {
     logger.error(`Error getting memory status: ${error.message}`);

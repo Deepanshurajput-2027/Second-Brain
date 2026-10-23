@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { ingestMemory, uploadMemory, checkMemoryStatus } from '../store/slices/memorySlice';
+import { ingestMemory, uploadMemory, checkMemoryStatus, fetchMemories } from '../store/slices/memorySlice';
 import { useToast } from '../components/ToastProvider';
 
 export const useMemoryIngester = () => {
@@ -40,10 +40,14 @@ export const useMemoryIngester = () => {
     const intervalId = setInterval(async () => {
       try {
         attempts++;
+        // Dispatch to Redux so the reducer merges tags/summary/title
+        // into the store automatically when the AI job completes
         const result = await dispatch(checkMemoryStatus(memoryId)).unwrap();
         
         if (result.aiStatus === 'completed') {
           clearInterval(intervalId);
+          // Refresh the full list to ensure all cards are up-to-date
+          dispatch(fetchMemories());
           toast.success(isFile ? 'File processed and saved successfully!' : 'Memory saved and summarized!');
         } else if (result.aiStatus === 'failed') {
           clearInterval(intervalId);

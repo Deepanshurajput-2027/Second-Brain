@@ -132,11 +132,10 @@ const processAiJob = async (job) => {
       title = parsedData.title || '';
     }
 
-    // Save summary, tags, title, and aiStatus to MongoDB
+    // Step 1: Save summary, tags, title to MongoDB (keep aiStatus as 'processing' until vector is stored)
     const updatePayload = {
       summary,
       tags,
-      aiStatus: 'completed'
     };
     if (title) {
       updatePayload.title = title;
@@ -144,7 +143,8 @@ const processAiJob = async (job) => {
 
     const updatedMemory = await Memory.findByIdAndUpdate(memoryId, updatePayload, { new: true });
 
-    // Qdrant Embeddings Upsert
+    // Step 2: Generate embedding and upsert to Qdrant
+    // Only mark aiStatus='completed' AFTER the vector is safely stored
     try {
       const tagString = (updatedMemory.tags && updatedMemory.tags.length > 0) ? updatedMemory.tags.join(', ') : '';
       const textToEmbed = `Title: ${updatedMemory.title || ''}\nSummary: ${updatedMemory.summary || ''}\nTags: ${tagString}`.trim();
@@ -170,13 +170,17 @@ const processAiJob = async (job) => {
         ]
       });
       logger.info(`[Worker] Successfully upserted vector for memoryId: ${memoryId}`);
+
+      // Step 3: Only now mark as completed — summary, tags, AND vector are all persisted
+      await Memory.findByIdAndUpdate(memoryId, { aiStatus: 'completed' });
     } catch (embeddingError) {
       logger.error(`[Worker] Failed to generate/upsert embedding for ${memoryId}: ${embeddingError.message}`);
-      // Throw the error so BullMQ can track retries or mark failed
+      // Throw the error so BullMQ can retry or mark the job as failed
       throw embeddingError;
     }
 
     logger.info(`[Worker] Finished processing for memoryId: ${memoryId}`);
+
 
   } catch (error) {
     logger.error(`[Worker] Error processing job for memoryId ${memoryId}: ${error.message}`);
