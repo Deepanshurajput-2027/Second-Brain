@@ -144,11 +144,10 @@ export class AuthService {
       resetPasswordExpires,
     });
 
-    try {
-      await sendPasswordResetEmail(user.email, resetToken);
-    } catch (err) {
-      console.error('Failed to send password reset email:', err.message);
-    }
+    // Dispatch email asynchronously so client response is instant (<100ms)
+    sendPasswordResetEmail(user.email, resetToken).catch((err) => {
+      console.error('Failed to send password reset email:', err?.message || err);
+    });
   }
 
   /**
